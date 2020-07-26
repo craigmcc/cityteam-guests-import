@@ -15,7 +15,9 @@
  */
 package org.cityteam.guests.importer;
 
-import org.cityteam.guests.action.Import;
+import org.cityteam.guests.action.ImportProblem;
+import org.cityteam.guests.action.ImportRequest;
+import org.cityteam.guests.action.ImportResults;
 import org.cityteam.guests.client.FacilityClient;
 import org.cityteam.guests.model.Facility;
 import org.cityteam.guests.model.Registration;
@@ -44,16 +46,18 @@ import static org.cityteam.guests.model.types.FeatureType.H;
 import static org.cityteam.guests.model.types.FeatureType.S;
 import static org.cityteam.guests.model.types.PaymentType.$$;
 import static org.cityteam.guests.model.types.PaymentType.FM;
+import static org.cityteam.guests.model.types.PaymentType.UK;
 
 public class Main {
 
     // Accept mm/dd/yy or mm/dd/yyyy
     public static DateTimeFormatter alternateDateTimeFormatter = createDateTimeFormatter();
     public static LocalDate dummyDate = LocalDate.parse("2999-12-31");
-    public static List<Import> imports = new ArrayList<>();
+    public static List<ImportRequest> imports = new ArrayList<>();
     public static Facility facility;
     public static final FacilityClient facilityClient = new FacilityClient();
     public static LocalDate fromDate;
+    public static ImportResults importResults;
     public static String pathname;
     public static BufferedReader reader;
     public static LocalDate registrationDate = null;
@@ -212,19 +216,24 @@ public class Main {
                 " rows: " + imports.size() +
                 (!isNormalSize(imports.size()) ? " ***" : ""));
         try {
-            registrations = facilityClient.importRegistrationsByFacilityAndDate(
+            importResults = facilityClient.importRegistrationsByFacilityAndDate(
                     facility.getId(),
                     localDate,
                     imports
             );
-        } catch (BadRequest badRequest) {
-            badRequest.printStackTrace();
+        } catch (BadRequest e) {
+            System.out.println("SEND BR:  " + e.getMessage());
         } catch (InternalServerError e) {
             System.out.println("SEND ISE: " + e.getMessage());
         } catch (NotFound e) {
             System.out.println("SEND NF:  " + e.getMessage());
         } catch (NotUnique e) {
             System.out.println("SEND NU:  " + e.getMessage());
+        }
+        if (importResults.getProblems() != null) {
+            for (ImportProblem problem : importResults.getProblems()) {
+                System.out.println("PROBLEM: " + problem);
+            }
         }
         registrationDate = null;
     }
@@ -298,7 +307,7 @@ public class Main {
     }
 
     /**
-     * <p>Format an {@link Import} for the specified line, and add it to
+     * <p>Format an {@link ImportRequest} for the specified line, and add it to
      * the list we will be sending.</p>
      */
     public static void processLine(Line line) {
@@ -306,7 +315,7 @@ public class Main {
             skipRest = true;
             return;
         }
-        Import newImport = new Import(
+        ImportRequest newImport = new ImportRequest(
                 line.comments,
                 line.features,
                 line.first,
@@ -317,6 +326,30 @@ public class Main {
                 null,
                 null
         );
+        if ((line.first != null) && (line.first.toLowerCase().startsWith("reserved"))) {
+            ImportProblem problem = new ImportProblem(
+                    "reserved: Mat is marked reserved",
+                    newImport,
+                    "Left unassigned"
+            );
+            newImport.setFirstName(null);
+            newImport.setLastName(null);
+            System.out.println("PROBLEM: " + problem);
+        } else if ("?????".equals(line.last)) {
+            ImportProblem problem = new ImportProblem(
+                    "lastName: Missing last name",
+                    newImport,
+                    "Trying to assign anyway with last name '?????'"
+            );
+            System.out.println("PROBLEM: " + problem);
+        } else if ("?????".equals(line.first)) {
+            ImportProblem problem = new ImportProblem(
+                    "firstName: Missing first name",
+                    newImport,
+                    "Trying to assign anyway with first name '?????'"
+            );
+            System.out.println("PROBLEM: " + problem);
+        }
         imports.add(newImport);
     }
 
@@ -375,7 +408,7 @@ public class Main {
             } catch (IllegalArgumentException e) {
                 System.out.println("Cannot parse paymentType '" +
                         fields[4] + "'");
-                line.type = FM;
+                line.type = UK;
             }
         }
         if ($$.equals(line.type)) {
